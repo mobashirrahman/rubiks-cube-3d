@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>3D Rubik's Cube — Scramble &amp; Solve Turn by Turn</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #151a26; --panel2: #1d2436;
+    --text: #e8ecf4; --muted: #9aa4bd; --accent: #4f8cff;
+    --green: #22c55e; --orange: #f59e0b; --red: #ef4444; --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1200px 800px at 30% 20%, #16203a 0%, var(--bg) 60%); color: var(--text); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 12px 18px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #263049; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  #status { margin-left: auto; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: #1f2937; border: 1px solid #334155; }
+  #status.solved { background: rgba(34,197,94,.15); border-color: var(--green); color: #86efac; }
+  #status.working { background: rgba(79,140,255,.15); border-color: var(--accent); color: #bfdbfe; }
+  #status.thinking { background: rgba(167,139,250,.15); border-color: var(--purple); color: #ddd6fe; }
+  #status.error { background: rgba(239,68,68,.15); border-color: var(--red); color: #fecaca; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #view { flex: 1; position: relative; min-width: 0; }
+  #c { width: 100%; height: 100%; display: block; }
+  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; background: rgba(0,0,0,.35); padding: 6px 10px; border-radius: 8px; }
+  aside { width: 360px; max-width: 42vw; background: var(--panel); border-left: 1px solid #263049; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel2); border: 1px solid #2a3550; border-radius: 12px; padding: 12px; }
+  .card h3 { margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { background: #243150; color: var(--text); border: 1px solid #33456e; border-radius: 10px; padding: 9px 12px; font-size: 14px; font-weight: 600; cursor: pointer; transition: .15s; }
+  button:hover:not(:disabled) { background: #2e3d63; transform: translateY(-1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button.success { background: var(--green); border-color: var(--green); color: #06210f; }
+  button.warn { background: #3a2b12; border-color: var(--orange); }
+  .stepper { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  #progressWrap { background: #0f1422; border-radius: 8px; height: 10px; overflow: hidden; border: 1px solid #2a3550; }
+  #progressBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--purple)); transition: width .2s; }
+  #progressText { font-size: 13px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  #moveList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 130px; overflow-y: auto; margin-top: 8px; }
+  #moveList span { font-family: JetBrains Mono, ui-monospace, monospace; font-size: 13px; padding: 4px 8px; border-radius: 7px; background: #0f1422; border: 1px solid #2a3550; }
+  #moveList span.done { background: #1a2b1f; border-color: var(--green); color: #86efac; }
+  #moveList span.current { background: var(--accent); border-color: var(--accent); color: white; }
+  #moveList span.todo { opacity: .85; }
+  .mono { font-family: JetBrains Mono, ui-monospace, monospace; font-size: 12.5px; word-break: break-word; background: #0f1422; border: 1px solid #2a3550; border-radius: 8px; padding: 8px; min-height: 34px; }
+  .manual { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .manual button { padding: 7px 0; font-size: 13px; font-family: JetBrains Mono, monospace; }
+  label.speed { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  input[type=range] { flex: 1; }
+  .badge { display: inline-block; font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid #33456e; color: var(--muted); }
+  kbd { background: #0f1422; border: 1px solid #33456e; border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; font-size: 12px; font-family: inherit; }
+  @media (max-width: 900px) { main { flex-direction: column; } aside { width: 100%; max-width: none; } #view { min-height: 52vh; } body { height: auto; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<!-- True solver: Kociemba two-phase (min2phase, Chen Shuang). Single-file, ~20-move optimal solves. -->
+<script src="https://cdn.jsdelivr.net/gh/cs0x7f/min2phase.js@master/min2phase.js"></script>
+</head>
+<body>
+<header>
+  <h1>3D Rubik's Cube</h1>
+  <span class="sub">scramble &amp; solve visually, turn by turn</span>
+  <span id="methodBadge" class="badge" title="Solving algorithm">Kociemba · min2phase</span>
+  <div id="status" class="solved">Solved</div>
+</header>
+<main>
+  <div id="view">
+    <canvas id="c"></canvas>
+    <div id="hint">Drag to orbit · Scroll to zoom · <kbd>←</kbd><kbd>→</kbd> step · <kbd>Space</kbd> play/pause</div>
+  </div>
+  <aside>
+    <div class="card">
+      <h3>Scramble / Solve</h3>
+      <div class="row">
+        <button id="btnScramble" class="primary" style="flex:1">Scramble (22)</button>
+        <button id="btnSolve" class="success" style="flex:1">Solve</button>
+        <button id="btnReset" style="flex:0 0 auto">Reset</button>
+      </div>
+      <div style="height:8px"></div>
+      <div class="stepper">
+        <button id="btnPrev">⏮ Prev</button>
+        <button id="btnPlay">▶ Play</button>
+        <button id="btnNext">Next ⏭</button>
+      </div>
+      <div style="height:10px"></div>
+      <label class="speed">Speed <input id="speed" type="range" min="0.25" max="3" step="0.25" value="1" /> <span id="speedVal">1×</span></label>
+      <div style="height:10px"></div>
+      <div id="progressWrap"><div id="progressBar"></div></div>
+      <div id="progressText">No moves queued</div>
+      <div id="moveList"></div>
+    </div>
+    <div class="card">
+      <h3>Notation</h3>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Scramble</div>
+      <div id="scrambleText" class="mono">—</div>
+      <div style="font-size:12px;color:var(--muted);margin:8px 0 4px">Solution (turn by turn)</div>
+      <div id="solutionText" class="mono">—</div>
+    </div>
+    <div class="card">
+      <h3>Manual twists (also solvable)</h3>
+      <div class="manual" id="manualBtns"></div>
+    </div>
+    <div class="card" style="font-size:13px;color:var(--muted);line-height:1.5">
+      True solver from <b>any</b> state (not just un-scramble) via Kociemba two-phase.
+      If the solver CDN fails, it falls back to reversing your history.
+      Serve via <span class="mono" style="display:inline;padding:1px 6px">python3 -m http.server</span> (ES modules need http, not file://).
+    </div>
+  </aside>
+</main>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============ Logical cube (verified vs min2phase.fromScramble) ============ */
+class CubeState {
+  constructor() {
+    this.cubies = new Map();
+    for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+      this.cubies.set(`${x},${y},${z}`, {
+        px: x === 1 ? 'R' : null, nx: x === -1 ? 'L' : null,
+        py: y === 1 ? 'U' : null, ny: y === -1 ? 'D' : null,
+        pz: z === 1 ? 'F' : null, nz: z === -1 ? 'B' : null,
+      });
+    }
+  }
+  _turnCW(face) {
+    const next = new Map();
+    for (const [key, st] of this.cubies) {
+      const [x, y, z] = key.split(',').map(Number);
+      let nx = x, ny = y, nz = z; const ns = { ...st };
+      if (face === 'U' && y === 1) { nx = -z; nz = x; const o = { ...st }; ns.px = o.nz; ns.pz = o.px; ns.nx = o.pz; ns.nz = o.nx; }
+      else if (face === 'D' && y === -1) { nx = z; nz = -x; const o = { ...st }; ns.px = o.pz; ns.pz = o.nx; ns.nx = o.nz; ns.nz = o.px; }
+      else if (face === 'R' && x === 1) { ny = z; nz = -y; const o = { ...st }; ns.py = o.pz; ns.pz = o.ny; ns.ny = o.nz; ns.nz = o.py; }
+      else if (face === 'L' && x === -1) { ny = -z; nz = y; const o = { ...st }; ns.py = o.nz; ns.nz = o.ny; ns.ny = o.pz; ns.pz = o.py; }
+      else if (face === 'F' && z === 1) { nx = y; ny = -x; const o = { ...st }; ns.px = o.py; ns.py = o.nx; ns.nx = o.ny; ns.ny = o.px; }
+      else if (face === 'B' && z === -1) { nx = -y; ny = x; const o = { ...st }; ns.px = o.ny; ns.ny = o.nx; ns.nx = o.py; ns.py = o.px; }
+      else { next.set(key, ns); continue; }
+      next.set(`${nx},${ny},${nz}`, ns);
+    }
+    this.cubies = next;
+  }
+  applyMove(move) {
+    const face = move[0]; const suf = move.slice(1);
+    let turns = 1; if (suf === "'") turns = 3; else if (suf === '2') turns = 2;
+    for (let i = 0; i < turns; i++) this._turnCW(face);
+  }
+  applyMoves(moves) { for (const m of moves) this.applyMove(m); }
+  get(k) { return this.cubies.get(k); }
+  getFaceletString() {
+    let s = '';
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`${-1 + c},1,${-1 + r}`).py;      // U
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`1,${1 - r},${1 - c}`).px;      // R
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`${-1 + c},${1 - r},1`).pz;     // F
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`${-1 + c},-1,${1 - r}`).ny;    // D
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`-1,${1 - r},${-1 + c}`).nx;    // L
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) s += this.get(`${1 - c},${1 - r},-1`).nz;     // B
+    return s;
+  }
+  isSolved() { return this.getFaceletString() === 'UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB'; }
+}
+const invertMove = (m) => m.endsWith("'") ? m[0] : m.endsWith('2') ? m : m + "'";
+const parseAlg = (s) => (s || '').trim().split(/\s+/).filter(Boolean);
+
+/* ============ Three.js scene ============ */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(5.2, 4.2, 6.4);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.dampingFactor = 0.08; controls.minDistance = 4; controls.maxDistance = 16;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const dir = new THREE.DirectionalLight(0xffffff, 1.6);
+dir.position.set(6, 10, 7); dir.castShadow = true;
+dir.shadow.mapSize.set(2048, 2048);
+scene.add(dir);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.35); fill.position.set(-6, 3, -6); scene.add(fill);
+
+const FACE_COLORS = { U: 0xffd500, D: 0xf5f5f5, F: 0x009b48, B: 0x0046ad, R: 0xc41e3a, L: 0xff5800 };
+const boxGeo = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+const boxMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.35, metalness: 0.15 });
+const stickerGeo = new THREE.PlaneGeometry(0.84, 0.84);
+
+let cubeState = new CubeState();
+let visualCubies = [];
+const view = document.getElementById('view');
+function buildVisual() {
+  for (const c of visualCubies) scene.remove(c);
+  visualCubies = [];
+  for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+    if (x === 0 && y === 0 && z === 0) continue;
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    const box = new THREE.Mesh(boxGeo, boxMat);
+    box.castShadow = true; box.receiveShadow = true;
+    g.add(box);
+    const st = cubeState.get(`${x},${y},${z}`);
+    const add = (color, pos, rot) => {
+      const m = new THREE.Mesh(stickerGeo, new THREE.MeshStandardMaterial({ color, roughness: 0.25, metalness: 0.05 }));
+      m.position.set(...pos); m.rotation.set(...rot); g.add(m);
+    };
+    if (st.px) add(FACE_COLORS[st.px], [0.481, 0, 0], [0, Math.PI / 2, 0]);
+    if (st.nx) add(FACE_COLORS[st.nx], [-0.481, 0, 0], [0, -Math.PI / 2, 0]);
+    if (st.py) add(FACE_COLORS[st.py], [0, 0.481, 0], [-Math.PI / 2, 0, 0]);
+    if (st.ny) add(FACE_COLORS[st.ny], [0, -0.481, 0], [Math.PI / 2, 0, 0]);
+    if (st.pz) add(FACE_COLORS[st.pz], [0, 0, 0.481], [0, 0, 0]);
+    if (st.nz) add(FACE_COLORS[st.nz], [0, 0, -0.481], [0, Math.PI, 0]);
+    g.userData.home = `${x},${y},${z}`;
+    scene.add(g); visualCubies.push(g);
+  }
+}
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view); resize();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+/* ============ Move engine (turn-by-turn animation) ============ */
+function visualParams(move) {
+  const f = move[0], s = move.slice(1);
+  const dbl = s === '2';
+  const prime = s === "'";
+  // clockwise (looking at the face) angles — must match CubeState._turnCW
+  switch (f) {
+    case 'U': return { axis: 'y', layer: 1, angle: dbl ? Math.PI : prime ? Math.PI / 2 : -Math.PI / 2 };
+    case 'D': return { axis: 'y', layer: -1, angle: dbl ? Math.PI : prime ? -Math.PI / 2 : Math.PI / 2 };
+    case 'R': return { axis: 'x', layer: 1, angle: dbl ? Math.PI : prime ? Math.PI / 2 : -Math.PI / 2 };
+    case 'L': return { axis: 'x', layer: -1, angle: dbl ? Math.PI : prime ? -Math.PI / 2 : Math.PI / 2 };
+    case 'F': return { axis: 'z', layer: 1, angle: dbl ? Math.PI : prime ? Math.PI / 2 : -Math.PI / 2 };
+    case 'B': return { axis: 'z', layer: -1, angle: dbl ? Math.PI : prime ? -Math.PI / 2 : Math.PI / 2 };
+  }
+}
+const easeInOut = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function snapCubie(c) {
+  c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
+  const m = new THREE.Matrix4().makeRotationFromQuaternion(c.quaternion);
+  const e = m.elements;
+  for (let i = 0; i < 16; i++) e[i] = Math.round(e[i]);
+  c.quaternion.setFromRotationMatrix(m);
+}
+function animateMove(move, durationMs) {
+  return new Promise((resolve) => {
+    const { axis, layer, angle } = visualParams(move);
+    const pivot = new THREE.Group(); scene.add(pivot);
+    scene.updateMatrixWorld(true);
+    const slice = visualCubies.filter((c) => Math.round(c.position[axis]) === layer);
+    slice.forEach((c) => pivot.attach(c));
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / durationMs);
+      pivot.rotation[axis] = angle * easeInOut(t);
+      if (t < 1) requestAnimationFrame(step);
+      else {
+        pivot.updateMatrixWorld(true);
+        slice.forEach((c) => { scene.attach(c); snapCubie(c); });
+        scene.remove(pivot);
+        resolve();
+      }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+/* ============ Controller + UI ============ */
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status'), moveListEl = $('moveList'), progBar = $('progressBar'), progText = $('progressText');
+let currentSequence = [], seqPos = 0, isAnimating = false, isPlaying = false, playToken = 0;
+let fullHistory = [], speed = 1; const BASE_MS = 380;
+
+function setStatus(text, cls = '') { statusEl.textContent = text; statusEl.className = cls; }
+function moveDuration() { return BASE_MS / speed; }
+function refreshButtons() {
+  const busy = isAnimating;
+  $('btnScramble').disabled = busy || isPlaying;
+  $('btnSolve').disabled = busy || isPlaying;
+  $('btnReset').disabled = busy;
+  $('btnPrev').disabled = busy || seqPos <= 0;
+  $('btnNext').disabled = busy || seqPos >= currentSequence.length;
+  $('btnPlay').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+  document.querySelectorAll('#manualBtns button').forEach((b) => (b.disabled = busy || isPlaying));
+}
+function renderMoves() {
+  moveListEl.innerHTML = '';
+  currentSequence.forEach((m, i) => {
+    const s = document.createElement('span');
+    s.textContent = m;
+    s.className = i < seqPos ? 'done' : i === seqPos ? 'current' : 'todo';
+    moveListEl.appendChild(s);
+  });
+  const n = currentSequence.length;
+  progBar.style.width = n ? `${(100 * seqPos) / n}%` : '0%';
+  progText.textContent = n ? `Move ${seqPos}/${n}` + (seqPos < n ? ` · next: ${currentSequence[seqPos]}` : ' · done') : 'No moves queued';
+  refreshButtons();
+  const cur = moveListEl.querySelector('.current'); if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+function updateSolvedStatus(prefix = '') {
+  if (cubeState.isSolved()) setStatus(prefix ? prefix + ' · Solved ✓' : 'Solved ✓', 'solved');
+}
+async function playOneForward() {
+  if (seqPos >= currentSequence.length) return;
+  const m = currentSequence[seqPos];
+  isAnimating = true; renderMoves();
+  setStatus(`Turning ${m} (${seqPos + 1}/${currentSequence.length})…`, 'working');
+  await animateMove(m, moveDuration());
+  cubeState.applyMove(m); fullHistory.push(m); seqPos++;
+  isAnimating = false; renderMoves(); updateSolvedStatus();
+}
+async function playOneBack() {
+  if (seqPos <= 0) return;
+  const m = currentSequence[seqPos - 1], inv = invertMove(m);
+  isAnimating = true; renderMoves();
+  setStatus(`Undo ${m}…`, 'working');
+  await animateMove(inv, moveDuration());
+  cubeState.applyMove(inv); fullHistory.pop(); seqPos--;
+  isAnimating = false; renderMoves();
+  setStatus(cubeState.isSolved() ? 'Solved ✓' : `Stepped back (${seqPos}/${currentSequence.length})`, cubeState.isSolved() ? 'solved' : '');
+}
+async function autoplay(token) {
+  while (isPlaying && token === playToken && seqPos < currentSequence.length) {
+    await playOneForward();
+    if (token !== playToken) break;
+  }
+  if (token === playToken) {
+    isPlaying = false; renderMoves();
+    if (seqPos >= currentSequence.length && currentSequence.length) {
+      setStatus(cubeState.isSolved() ? `Solved ✓ in ${currentSequence.length} moves` : `Done (${currentSequence.length} moves)`, cubeState.isSolved() ? 'solved' : '');
+    }
+  }
+}
+function randomScramble(n = 22) {
+  const faces = ['U', 'R', 'F', 'D', 'L', 'B'], suf = ['', "'", '2'];
+  const out = []; let prev = '';
+  for (let i = 0; i < n; i++) {
+    let f; do { f = faces[(Math.random() * 6) | 0]; } while (f === prev);
+    prev = f; out.push(f + suf[(Math.random() * 3) | 0]);
+  }
+  return out;
+}
+
+$('btnScramble').onclick = async () => {
+  if (isAnimating || isPlaying) return;
+  playToken++; isPlaying = false;
+  const sc = randomScramble(22);
+  currentSequence = sc; seqPos = 0;
+  $('scrambleText').textContent = sc.join(' ');
+  $('solutionText').textContent = '—';
+  $('methodBadge').textContent = 'scramble · 22 moves';
+  setStatus('Scrambling…', 'working'); renderMoves();
+  isPlaying = true; renderMoves();
+  const tok = ++playToken; await autoplay(tok);
+  if (cubeState.isSolved()) setStatus('Solved ✓', 'solved'); else setStatus(`Scrambled (${sc.length} moves) — press Solve`, '');
+  renderMoves();
+};
+$('btnSolve').onclick = async () => {
+  if (isAnimating || isPlaying) return;
+  if (cubeState.isSolved()) { setStatus('Already solved ✓', 'solved'); return; }
+  playToken++; isPlaying = false;
+  setStatus('Thinking (Kociemba)…', 'thinking');
+  refreshButtons();
+  await new Promise((r) => setTimeout(r, 30));
+  try {
+    if (typeof min2phase === 'undefined') throw new Error('solver CDN not loaded');
+    const facelet = cubeState.getFaceletString();
+    const raw = min2phase.solve(facelet);
+    if (!raw || raw.indexOf('Error') === 0) throw new Error(typeof raw === 'string' ? raw : 'solver error');
+    const sol = parseAlg(raw);
+    if (!sol.length) { setStatus('Already solved ✓', 'solved'); renderMoves(); return; }
+    // verify before animating
+    const check = new CubeState();
+    // rebuild check state from current facelet? simpler: clone via moves is hard; re-derive by replaying history from solved
+    const replay = new CubeState(); replay.applyMoves(fullHistory);
+    replay.applyMoves(sol);
+    if (!replay.isSolved()) throw new Error('verification failed');
+    currentSequence = sol; seqPos = 0;
+    $('solutionText').textContent = sol.join(' ');
+    $('methodBadge').textContent = `Kociemba · ${sol.length} moves`;
+    setStatus(`Solving… (${sol.length} moves)`, 'working'); renderMoves();
+    isPlaying = true; renderMoves();
+    const tok = ++playToken; await autoplay(tok);
+  } catch (e) {
+    console.warn('Kociemba failed, fallback to reverse:', e);
+    const fb = fullHistory.slice().reverse().map(invertMove);
+    if (!fb.length) { setStatus('Solve failed: ' + e.message, 'error'); renderMoves(); return; }
+    currentSequence = fb; seqPos = 0;
+    $('solutionText').textContent = fb.join(' ') + '  (fallback: reverse)';
+    $('methodBadge').textContent = 'fallback · reverse';
+    setStatus(`Solving via reverse (${fb.length} moves)…`, 'working'); renderMoves();
+    isPlaying = true; renderMoves();
+    const tok = ++playToken; await autoplay(tok);
+  }
+};
+$('btnReset').onclick = () => {
+  if (isAnimating) return;
+  playToken++; isPlaying = false;
+  cubeState = new CubeState(); buildVisual();
+  currentSequence = []; seqPos = 0; fullHistory = [];
+  $('scrambleText').textContent = '—'; $('solutionText').textContent = '—';
+  $('methodBadge').textContent = 'Kociemba · min2phase';
+  setStatus('Solved ✓', 'solved'); renderMoves();
+};
+$('btnNext').onclick = async () => { if (isAnimating || isPlaying || seqPos >= currentSequence.length) return; isPlaying = false; await playOneForward(); };
+$('btnPrev').onclick = async () => { if (isAnimating || isPlaying || seqPos <= 0) return; isPlaying = false; await playOneBack(); };
+$('btnPlay').onclick = async () => {
+  if (isAnimating) return;
+  if (isPlaying) { isPlaying = false; playToken++; setStatus('Paused', ''); renderMoves(); return; }
+  if (seqPos >= currentSequence.length) return;
+  isPlaying = true; renderMoves();
+  const tok = ++playToken; await autoplay(tok);
+};
+$('speed').oninput = (e) => { speed = parseFloat(e.target.value); $('speedVal').textContent = speed + '×'; };
+
+// manual twists
+const manualFaces = ['U', 'R', 'F', 'D', 'L', 'B'];
+const mb = $('manualBtns');
+for (const f of manualFaces) for (const s of ['', "'"]) {
+  const b = document.createElement('button');
+  b.textContent = f + s; b.title = 'Twist ' + f + s;
+  b.onclick = async () => {
+    if (isAnimating || isPlaying) return;
+    playToken++; isPlaying = false;
+    currentSequence = []; seqPos = 0; // manual breaks stepper queue
+    isAnimating = true; refreshButtons(); setStatus(`Turning ${f + s}…`, 'working');
+    await animateMove(f + s, moveDuration());
+    cubeState.applyMove(f + s); fullHistory.push(f + s);
+    isAnimating = false;
+    setStatus(cubeState.isSolved() ? 'Solved ✓' : 'Twisted — Solve works from here', cubeState.isSolved() ? 'solved' : '');
+    renderMoves();
+  };
+  mb.appendChild(b);
+}
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); $('btnPlay').click(); }
+  else if (e.key === 'ArrowRight') $('btnNext').click();
+  else if (e.key === 'ArrowLeft') $('btnPrev').click();
+});
+
+buildVisual(); renderMoves(); setStatus('Solved ✓', 'solved');
+// warm up solver tables on idle so first Solve is instant
+setTimeout(() => { try { if (typeof min2phase !== 'undefined' && min2phase.initFull) min2phase.initFull(); } catch {} }, 1500);
+</script>
+</body>
+</html>
